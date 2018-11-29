@@ -1,5 +1,6 @@
 package com.fotsum;
 
+import okhttp3.*;
 import org.jivesoftware.openfire.PresenceManager;
 import org.jivesoftware.openfire.XMPPServer;
 import org.jivesoftware.openfire.container.Plugin;
@@ -22,8 +23,9 @@ import javax.ws.rs.client.Client;
 import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.client.Entity;
 import javax.ws.rs.client.WebTarget;
-import javax.ws.rs.core.Response;
+//import javax.ws.rs.core.Response;
 import java.io.File;
+import java.io.IOException;
 import java.util.UUID;
 import java.util.concurrent.Future;
 
@@ -54,6 +56,7 @@ public class CallbackOnOffline implements Plugin, PacketInterceptor {
         token = getProperty(PROPERTY_TOKEN, UUID.randomUUID().toString());
 
         if (debug) {
+            Log.debug("Value of sendBody property", sendBody);
             Log.debug("initialize CallbackOnOffline plugin. Start.");
             Log.debug("Loaded properties: \nurl={}, \ntoken={}, \nsendBody={}", new Object[]{url, token, sendBody});
         }
@@ -104,11 +107,16 @@ public class CallbackOnOffline implements Plugin, PacketInterceptor {
                 return;
             }
 
+            if (msg.getBody() == null || msg.getBody().isEmpty()) {
+                return;
+            }
+
             try {
                 User userTo = userManager.getUser(to.getNode());
                 boolean available = presenceManager.isAvailable(userTo);
 
                 if (debug) {
+                    Log.debug(" Hello here is our packet ", packet.toString());
                     Log.debug("intercepted message from {} to {}, recipient is available {}", new Object[]{packet.getFrom().toBareJID(), to.toBareJID(), available});
                 }
 
@@ -119,29 +127,52 @@ public class CallbackOnOffline implements Plugin, PacketInterceptor {
                     WebTarget target = client.target(url);
 
                     if (debug) {
+                        Log.debug("This is the body ",msg.getBody());
                         Log.debug("sending request to url='{}'", target);
                     }
 
                     MessageData data = new MessageData(token, from.toBareJID(), to.toBareJID(), body);
 
-                    Future<Response> responseFuture = target
-                            .request()
-                            .async()
-                            .post(Entity.json(data));
+                    MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
-                    if (debug) {
-                        try {
-                            Response response = responseFuture.get();
-                            Log.debug("got response status url='{}' status='{}'", target, response.getStatus());
-                        } catch (Exception e) {
-                            Log.debug("can't get response status url='{}'", target, e);
-                        }
-                    }
+                    String jsonString = String.format("{\"token\":\"%s\",\"body\":\"%s\",\"to\":\"%s\", \"from\": \"%s\"}", token, body, to.toBareJID(), from.toBareJID());
+                    RequestBody requestBody = RequestBody.create(JSON, jsonString);
+                    OkHttpClient client = new OkHttpClient();
+                    Request request = new Request.Builder()
+                            .url(url)
+                            .post(requestBody)
+                            .build();
+
+                    Response okResponse = client.newCall(request).execute();
+                    Log.debug(String.format("got response okhttp ======= %s", okResponse.body().string()));
+
+//                    Entity<MessageData> json = Entity.json(data);
+//                    if (debug) {
+//                        Log.debug(" this log is from DD =====================");
+//                        Log.debug(data.toString());
+//                        Log.debug(json.toString());
+//                        Log.debug(" this log is from DD =====================");
+//                    }
+//                    Future<Response> responseFuture = target
+//                            .request()
+//                            .async()
+//                            .post(json);
+//
+//                    if (debug) {
+//                        try {
+//                            Response response = responseFuture.get();
+//                            Log.debug("got response status url='{}' status='{}'", target, response.getStatus());
+//                        } catch (Exception e) {
+//                            Log.debug("can't get response status url='{}'", target, e);
+//                        }
+//                    }
                 }
             } catch (UserNotFoundException e) {
                 if (debug) {
                     Log.debug("can't find user with name: " + to.getNode());
                 }
+            } catch (IOException e) {
+                e.printStackTrace();
             }
         }
     }
